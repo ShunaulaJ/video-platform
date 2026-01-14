@@ -1,6 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 1, "column": 0}, "map": {"version":3,"sources":["file:///Users/jsphrs/video-poc/video-platform/src/app/globals.css"],"sourcesContent":[":root {\n  --background: #0a0a0a;\n  --foreground: #ededed;\n  --primary: #3b82f6;\n  --secondary: #1f2937;\n}\n\nbody {\n  color: var(--foreground);\n  background: var(--background);\n  font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif;\n  margin: 0;\n  padding: 0;\n  min-height: 100vh;\n}\n\n* {\n  box-sizing: border-box;\n}\n"],"names":[],"mappings":"AAAA;;;;;;;AAOA;;;;;;;;;AASA"}}]
-}
