@@ -19,8 +19,14 @@ export default function Room() {
             setIsConnected(true);
         });
 
+        socketRef.current.on('roomFull', () => {
+            alert('Room is full (max 2 users).');
+        });
+
         return () => {
-            socketRef.current.disconnect();
+            if (socketRef.current) {
+                socketRef.current.disconnect();
+            }
         };
     }, []);
 
@@ -69,11 +75,19 @@ export default function Room() {
                         });
                     });
 
-                    // 6. Produce!
-                    const track = stream.getVideoTracks()[0];
-                    await sendTransport.produce({ track });
+                    // 6. Produce Video
+                    const videoTrack = stream.getVideoTracks()[0];
+                    if (videoTrack) {
+                        await sendTransport.produce({ track: videoTrack });
+                    }
 
-                    console.log('Producing video track!');
+                    // 7. Produce Audio
+                    const audioTrack = stream.getAudioTracks()[0];
+                    if (audioTrack) {
+                        await sendTransport.produce({ track: audioTrack });
+                    }
+
+                    console.log('Producing video and audio tracks!');
                 });
 
                 // Handle new producers
@@ -85,6 +99,30 @@ export default function Room() {
         } catch (err) {
             console.error('Error starting video:', err);
         }
+    };
+
+    const leaveRoom = () => {
+        if (socketRef.current) {
+            socketRef.current.disconnect();
+        }
+        if (localVideoRef.current && localVideoRef.current.srcObject) {
+            localVideoRef.current.srcObject.getTracks().forEach(track => track.stop());
+            localVideoRef.current.srcObject = null;
+        }
+        if (remoteVideoRef.current && remoteVideoRef.current.srcObject) {
+            remoteVideoRef.current.srcObject = null;
+        }
+        setIsConnected(false);
+
+        // Re-connect socket for next join attempt
+        socketRef.current = io();
+        socketRef.current.on('connect', () => {
+            console.log('Reconnected to signaling server');
+            setIsConnected(true);
+        });
+        socketRef.current.on('roomFull', () => {
+            alert('Room is full (max 2 users).');
+        });
     };
 
     const consume = async (producerId) => {
@@ -128,7 +166,17 @@ export default function Room() {
             });
 
             const { track } = consumer;
-            remoteVideoRef.current.srcObject = new MediaStream([track]);
+
+            // Handle Audio vs Video
+            if (params.kind === 'video') {
+                remoteVideoRef.current.srcObject = new MediaStream([track]);
+            } else if (params.kind === 'audio') {
+                if (remoteVideoRef.current.srcObject) {
+                    remoteVideoRef.current.srcObject.addTrack(track);
+                } else {
+                    remoteVideoRef.current.srcObject = new MediaStream([track]);
+                }
+            }
 
             // Resume the consumer
             socketRef.current.emit('resume');
@@ -150,20 +198,38 @@ export default function Room() {
                     <video ref={remoteVideoRef} autoPlay playsInline style={{ width: '300px', background: '#000', borderRadius: '8px' }} />
                 </div>
             </div>
-            <button
-                onClick={startVideo}
-                disabled={!isConnected}
-                style={{
-                    padding: '0.8rem 1.5rem',
-                    background: isConnected ? 'var(--primary)' : '#444',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: isConnected ? 'pointer' : 'not-allowed'
-                }}
-            >
-                Join Meeting & Start Video
-            </button>
+            <div style={{ display: 'flex', gap: '1rem' }}>
+                {!isConnected || (localVideoRef.current && !localVideoRef.current.srcObject) ? (
+                    <button
+                        onClick={startVideo}
+                        disabled={!isConnected}
+                        style={{
+                            padding: '0.8rem 1.5rem',
+                            background: isConnected ? 'var(--primary)' : '#444',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: isConnected ? 'pointer' : 'not-allowed'
+                        }}
+                    >
+                        Join Meeting & Start Video
+                    </button>
+                ) : (
+                    <button
+                        onClick={leaveRoom}
+                        style={{
+                            padding: '0.8rem 1.5rem',
+                            background: '#ff4444',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: 'pointer'
+                        }}
+                    >
+                        End Call
+                    </button>
+                )}
+            </div>
         </div>
     );
 }

@@ -38,9 +38,21 @@ app.prepare().then(async () => {
         }
     });
 
+    // Track connected peers
+    const connectedPeers = new Set();
+
     // Socket.io connection handler
     io.on('connection', (socket) => {
         console.log('Client connected:', socket.id);
+
+        if (connectedPeers.size >= 2) {
+            console.log('Room full, rejecting client:', socket.id);
+            socket.emit('roomFull');
+            socket.disconnect(true);
+            return;
+        }
+
+        connectedPeers.add(socket.id);
 
         // Get Router RTP Capabilities
         socket.on('getRouterRtpCapabilities', (callback) => {
@@ -144,6 +156,7 @@ app.prepare().then(async () => {
 
         socket.on('disconnect', () => {
             console.log('Client disconnected:', socket.id);
+            connectedPeers.delete(socket.id);
         });
     });
 
