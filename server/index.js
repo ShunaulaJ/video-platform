@@ -40,6 +40,8 @@ app.prepare().then(async () => {
 
     // Track connected peers
     const connectedPeers = new Set();
+    // Track producers
+    const producers = new Map();
 
     // Socket.io connection handler
     io.on('connection', (socket) => {
@@ -101,9 +103,17 @@ app.prepare().then(async () => {
             try {
                 const producer = await socket.transport.produce({ kind, rtpParameters });
 
+                producers.set(producer.id, producer);
+
                 producer.on('transportclose', () => {
                     console.log('Producer transport closed');
                     producer.close();
+                    producers.delete(producer.id);
+                });
+
+                producer.on('close', () => {
+                    console.log('Producer closed');
+                    producers.delete(producer.id);
                 });
 
                 // Broadcast new producer to other peers
@@ -120,10 +130,7 @@ app.prepare().then(async () => {
         socket.on('getProducers', (callback) => {
             // Return all producer IDs
             const producerIds = [];
-            router.producers.forEach((producer) => {
-                // Don't send back own producers (client should know, but good to filter if we tracked ownership)
-                // For now, client will just fail to consume own producer or we can filter by socket.transport.id if we linked them
-                // Simplified: send all, client filters or Mediasoup rejects consuming own producer on same transport usually
+            producers.forEach((producer) => {
                 producerIds.push(producer.id);
             });
             callback(producerIds);
