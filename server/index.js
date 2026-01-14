@@ -40,8 +40,9 @@ app.prepare().then(async () => {
 
     // Track connected peers
     const connectedPeers = new Set();
-    // Track producers
+    // Track producers with ownership (socketId -> producerIds)
     const producers = new Map();
+    const producerToSocket = new Map(); // producerId -> socketId
 
     // Socket.io connection handler
     io.on('connection', (socket) => {
@@ -95,6 +96,9 @@ app.prepare().then(async () => {
         socket.on('connectWebRtcTransport', async ({ dtlsParameters, consumer }, callback) => {
             try {
                 const transport = consumer ? socket.consumerTransport : socket.producerTransport;
+                if (!transport) {
+                    return callback({ error: 'Transport not found' });
+                }
                 await transport.connect({ dtlsParameters });
                 callback();
             } catch (error) {
@@ -109,16 +113,19 @@ app.prepare().then(async () => {
                 const producer = await socket.producerTransport.produce({ kind, rtpParameters });
 
                 producers.set(producer.id, producer);
+                producerToSocket.set(producer.id, socket.id);
 
                 producer.on('transportclose', () => {
                     console.log('Producer transport closed');
                     producer.close();
                     producers.delete(producer.id);
+                    producerToSocket.delete(producer.id);
                 });
 
                 producer.on('close', () => {
                     console.log('Producer closed');
                     producers.delete(producer.id);
+                    producerToSocket.delete(producer.id);
                 });
 
                 // Broadcast new producer to other peers
@@ -131,48 +138,63 @@ app.prepare().then(async () => {
             }
         });
 
-        // Get existing producers
+        // Get existing producers (excluding own producers)
         socket.on('getProducers', (callback) => {
-            // Return all producer IDs
             const producerIds = [];
-            producers.forEach((producer) => {
-                producerIds.push(producer.id);
+            producers.forEach((producer, id) => {
+                // Only return producers that DON'T belong to this socket
+                if (producerToSocket.get(id) !== socket.id) {
+                    producerIds.push(id);
+                }
             });
+            console.log(`getProducers for ${socket.id}: found ${producerIds.length} producers`);
             callback(producerIds);
         });
 
         // Consume media
         socket.on('consume', async ({ producerId, rtpCapabilities }, callback) => {
             try {
-                if (router.canConsume({ producerId, rtpCapabilities })) {
-                    const consumer = await socket.consumerTransport.consume({
-                        producerId,
-                        rtpCapabilities,
-                        paused: true,
-                    });
-
-                    consumer.on('transportclose', () => {
-                        console.log('Consumer transport closed');
-                        consumer.close();
-                    });
-
-                    consumer.on('producerclose', () => {
-                        console.log('Producer closed');
-                        consumer.close();
-                    });
-
-                    callback({
-                        params: {
-                            id: consumer.id,
-                            producerId,
-                            kind: consumer.kind,
-                            rtpParameters: consumer.rtpParameters,
-                        }
-                    });
-
-                    // Resume consumer
-                    await consumer.resume();
+                // Check if transport exists
+                if (!socket.consumerTransport) {
+                    console.error('Consumer transport not found');
+                    return callback({ error: 'Consumer transport not found' });
                 }
+
+                // Check if we can consume
+                if (!router.canConsume({ producerId, rtpCapabilities })) {
+                    console.error('Cannot consume producer:', producerId);
+                    return callback({ error: 'Cannot consume' });
+                }
+
+                const consumer = await socket.consumerTransport.consume({
+                    producerId,
+                    rtpCapabilities,
+                    paused: true,
+                });
+
+                consumer.on('transportclose', () => {
+                    console.log('Consumer transport closed');
+                    consumer.close();
+                });
+
+                consumer.on('producerclose', () => {
+                    console.log('Producer closed, closing consumer');
+                    consumer.close();
+                    socket.emit('producerClosed', { producerId });
+                });
+
+                callback({
+                    params: {
+                        id: consumer.id,
+                        producerId,
+                        kind: consumer.kind,
+                        rtpParameters: consumer.rtpParameters,
+                    }
+                });
+
+                // Resume consumer
+                await consumer.resume();
+                console.log(`Consumer created for producer ${producerId}`);
             } catch (error) {
                 console.error('Failed to consume:', error);
                 callback({ error: error.message });
@@ -182,6 +204,13 @@ app.prepare().then(async () => {
         socket.on('disconnect', () => {
             console.log('Client disconnected:', socket.id);
             connectedPeers.delete(socket.id);
+            // Clean up producers for this socket
+            producerToSocket.forEach((socketId, producerId) => {
+                if (socketId === socket.id) {
+                    producers.delete(producerId);
+                    producerToSocket.delete(producerId);
+                }
+            });
         });
     });
 
