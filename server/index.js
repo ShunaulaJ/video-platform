@@ -94,9 +94,50 @@ app.prepare().then(async () => {
                     producer.close();
                 });
 
+                // Broadcast new producer to other peers
+                socket.broadcast.emit('newProducer', { producerId: producer.id });
+
                 callback({ id: producer.id });
             } catch (error) {
                 console.error('Failed to produce:', error);
+                callback({ error: error.message });
+            }
+        });
+
+        // Consume media
+        socket.on('consume', async ({ producerId, rtpCapabilities }, callback) => {
+            try {
+                if (router.canConsume({ producerId, rtpCapabilities })) {
+                    const consumer = await socket.transport.consume({
+                        producerId,
+                        rtpCapabilities,
+                        paused: true,
+                    });
+
+                    consumer.on('transportclose', () => {
+                        console.log('Consumer transport closed');
+                        consumer.close();
+                    });
+
+                    consumer.on('producerclose', () => {
+                        console.log('Producer closed');
+                        consumer.close();
+                    });
+
+                    callback({
+                        params: {
+                            id: consumer.id,
+                            producerId,
+                            kind: consumer.kind,
+                            rtpParameters: consumer.rtpParameters,
+                        }
+                    });
+
+                    // Resume consumer
+                    await consumer.resume();
+                }
+            } catch (error) {
+                console.error('Failed to consume:', error);
                 callback({ error: error.message });
             }
         });
