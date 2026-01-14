@@ -199,7 +199,7 @@ export default function Room() {
                 </div>
             </div>
             <div style={{ display: 'flex', gap: '1rem' }}>
-                {!isConnected || (localVideoRef.current && !localVideoRef.current.srcObject) ? (
+                {!isConnected ? (
                     <button
                         onClick={startVideo}
                         disabled={!isConnected}

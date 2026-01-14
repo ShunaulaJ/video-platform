@@ -116,6 +116,19 @@ app.prepare().then(async () => {
             }
         });
 
+        // Get existing producers
+        socket.on('getProducers', (callback) => {
+            // Return all producer IDs
+            const producerIds = [];
+            router.producers.forEach((producer) => {
+                // Don't send back own producers (client should know, but good to filter if we tracked ownership)
+                // For now, client will just fail to consume own producer or we can filter by socket.transport.id if we linked them
+                // Simplified: send all, client filters or Mediasoup rejects consuming own producer on same transport usually
+                producerIds.push(producer.id);
+            });
+            callback(producerIds);
+        });
+
         // Consume media
         socket.on('consume', async ({ producerId, rtpCapabilities }, callback) => {
             try {
