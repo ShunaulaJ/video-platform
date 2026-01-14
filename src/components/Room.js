@@ -88,6 +88,11 @@ export default function Room() {
                     }
 
                     console.log('Producing video and audio tracks!');
+
+                    // 8. Get existing producers
+                    socketRef.current.emit('getProducers', (producerIds) => {
+                        producerIds.forEach((id) => consume(id));
+                    });
                 });
 
                 // Handle new producers
