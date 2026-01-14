@@ -140,22 +140,31 @@ export default function Room() {
 
             // 1. Create Recv Transport if not exists
             if (!device.recvTransport) {
-                await new Promise((resolve, reject) => {
-                    socketRef.current.emit('createWebRtcTransport', {}, async ({ params, error }) => {
-                        if (error) return reject(error);
+                // Check if we are already creating a transport
+                if (!device.transportCreationPromise) {
+                    device.transportCreationPromise = new Promise((resolve, reject) => {
+                        socketRef.current.emit('createWebRtcTransport', {}, async ({ params, error }) => {
+                            if (error) {
+                                device.transportCreationPromise = null; // Reset on error
+                                return reject(error);
+                            }
 
-                        const recvTransport = device.createRecvTransport(params);
-                        device.recvTransport = recvTransport; // Attach to device instance for easy access
+                            const recvTransport = device.createRecvTransport(params);
+                            device.recvTransport = recvTransport; // Attach to device instance for easy access
 
-                        recvTransport.on('connect', ({ dtlsParameters }, callback, errback) => {
-                            socketRef.current.emit('connectWebRtcTransport', { dtlsParameters }, (error) => {
-                                if (error) errback(error);
-                                else callback();
+                            recvTransport.on('connect', ({ dtlsParameters }, callback, errback) => {
+                                socketRef.current.emit('connectWebRtcTransport', { dtlsParameters }, (error) => {
+                                    if (error) errback(error);
+                                    else callback();
+                                });
                             });
+                            resolve();
                         });
-                        resolve();
                     });
-                });
+                }
+
+                // Wait for the transport to be created (by us or another concurrent call)
+                await device.transportCreationPromise;
             }
 
             // 2. Consume
