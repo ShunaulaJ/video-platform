@@ -76,7 +76,7 @@ export default function Room() {
                 deviceRef.current = device;
 
                 // 4. Create Transport on server
-                socketRef.current.emit('createWebRtcTransport', {}, async ({ params, error }) => {
+                socketRef.current.emit('createWebRtcTransport', { consumer: false }, async ({ params, error }) => {
                     if (error) {
                         console.error(error);
                         setIsJoined(false);
@@ -87,7 +87,7 @@ export default function Room() {
                     const sendTransport = device.createSendTransport(params);
 
                     sendTransport.on('connect', ({ dtlsParameters }, callback, errback) => {
-                        socketRef.current.emit('connectWebRtcTransport', { dtlsParameters }, (error) => {
+                        socketRef.current.emit('connectWebRtcTransport', { dtlsParameters, consumer: false }, (error) => {
                             if (error) errback(error);
                             else callback();
                         });
@@ -143,7 +143,8 @@ export default function Room() {
                 // Check if we are already creating a transport
                 if (!device.transportCreationPromise) {
                     device.transportCreationPromise = new Promise((resolve, reject) => {
-                        socketRef.current.emit('createWebRtcTransport', {}, async ({ params, error }) => {
+                        // Send consumer: true to tell server this is a receiving transport
+                        socketRef.current.emit('createWebRtcTransport', { consumer: true }, async ({ params, error }) => {
                             if (error) {
                                 device.transportCreationPromise = null; // Reset on error
                                 return reject(error);
@@ -153,7 +154,7 @@ export default function Room() {
                             device.recvTransport = recvTransport; // Attach to device instance for easy access
 
                             recvTransport.on('connect', ({ dtlsParameters }, callback, errback) => {
-                                socketRef.current.emit('connectWebRtcTransport', { dtlsParameters }, (error) => {
+                                socketRef.current.emit('connectWebRtcTransport', { dtlsParameters, consumer: true }, (error) => {
                                     if (error) errback(error);
                                     else callback();
                                 });
@@ -184,15 +185,11 @@ export default function Room() {
 
             const { track } = consumer;
 
-            // Handle Audio vs Video
-            if (params.kind === 'video') {
+            // Handle Audio vs Video - Merge into single stream if possible
+            if (remoteVideoRef.current.srcObject) {
+                remoteVideoRef.current.srcObject.addTrack(track);
+            } else {
                 remoteVideoRef.current.srcObject = new MediaStream([track]);
-            } else if (params.kind === 'audio') {
-                if (remoteVideoRef.current.srcObject) {
-                    remoteVideoRef.current.srcObject.addTrack(track);
-                } else {
-                    remoteVideoRef.current.srcObject = new MediaStream([track]);
-                }
             }
 
             // Resume the consumer

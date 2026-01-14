@@ -62,7 +62,7 @@ app.prepare().then(async () => {
         });
 
         // Create WebRtcTransport
-        socket.on('createWebRtcTransport', async (data, callback) => {
+        socket.on('createWebRtcTransport', async ({ consumer }, callback) => {
             try {
                 const transport = await router.createWebRtcTransport(config.webRtcTransport);
 
@@ -79,8 +79,12 @@ app.prepare().then(async () => {
                     }
                 });
 
-                // Store transport in socket for later use (simplified for POC)
-                socket.transport = transport;
+                // Store transport in socket
+                if (consumer) {
+                    socket.consumerTransport = transport;
+                } else {
+                    socket.producerTransport = transport;
+                }
             } catch (error) {
                 console.error('Failed to create transport:', error);
                 callback({ error: error.message });
@@ -88,9 +92,10 @@ app.prepare().then(async () => {
         });
 
         // Connect WebRtcTransport
-        socket.on('connectWebRtcTransport', async ({ dtlsParameters }, callback) => {
+        socket.on('connectWebRtcTransport', async ({ dtlsParameters, consumer }, callback) => {
             try {
-                await socket.transport.connect({ dtlsParameters });
+                const transport = consumer ? socket.consumerTransport : socket.producerTransport;
+                await transport.connect({ dtlsParameters });
                 callback();
             } catch (error) {
                 console.error('Failed to connect transport:', error);
@@ -101,7 +106,7 @@ app.prepare().then(async () => {
         // Produce media
         socket.on('produce', async ({ kind, rtpParameters }, callback) => {
             try {
-                const producer = await socket.transport.produce({ kind, rtpParameters });
+                const producer = await socket.producerTransport.produce({ kind, rtpParameters });
 
                 producers.set(producer.id, producer);
 
@@ -140,7 +145,7 @@ app.prepare().then(async () => {
         socket.on('consume', async ({ producerId, rtpCapabilities }, callback) => {
             try {
                 if (router.canConsume({ producerId, rtpCapabilities })) {
-                    const consumer = await socket.transport.consume({
+                    const consumer = await socket.consumerTransport.consume({
                         producerId,
                         rtpCapabilities,
                         paused: true,
