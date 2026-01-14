@@ -9,19 +9,44 @@ export default function Room() {
     const remoteVideoRef = useRef(null);
     const socketRef = useRef(null);
     const deviceRef = useRef(null);
-    const [isConnected, setIsConnected] = useState(false);
 
+    const [isSocketConnected, setIsSocketConnected] = useState(false);
+    const [isJoined, setIsJoined] = useState(false);
+    const [localStream, setLocalStream] = useState(null);
+
+    // 1. Initialize Socket and Local Preview on Mount
     useEffect(() => {
+        // Setup Socket
         socketRef.current = io();
 
         socketRef.current.on('connect', () => {
             console.log('Connected to signaling server');
-            setIsConnected(true);
+            setIsSocketConnected(true);
         });
 
         socketRef.current.on('roomFull', () => {
             alert('Room is full (max 2 users).');
+            setIsJoined(false);
         });
+
+        socketRef.current.on('newProducer', ({ producerId }) => {
+            console.log('New producer:', producerId);
+            consume(producerId);
+        });
+
+        // Setup Local Preview
+        const getMedia = async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                setLocalStream(stream);
+                if (localVideoRef.current) {
+                    localVideoRef.current.srcObject = stream;
+                }
+            } catch (err) {
+                console.error('Failed to get local media:', err);
+            }
+        };
+        getMedia();
 
         return () => {
             if (socketRef.current) {
@@ -30,11 +55,18 @@ export default function Room() {
         };
     }, []);
 
-    const startVideo = async () => {
+    // Ensure video element gets stream if it re-renders
+    useEffect(() => {
+        if (localVideoRef.current && localStream) {
+            localVideoRef.current.srcObject = localStream;
+        }
+    }, [localStream]);
+
+    const joinMeeting = async () => {
+        if (!localStream || !isSocketConnected) return;
+
         try {
-            // 1. Get local media
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-            localVideoRef.current.srcObject = stream;
+            setIsJoined(true);
 
             // 2. Get Router RTP Capabilities
             socketRef.current.emit('getRouterRtpCapabilities', async (rtpCapabilities) => {
@@ -47,6 +79,7 @@ export default function Room() {
                 socketRef.current.emit('createWebRtcTransport', {}, async ({ params, error }) => {
                     if (error) {
                         console.error(error);
+                        setIsJoined(false);
                         return;
                     }
 
@@ -55,94 +88,64 @@ export default function Room() {
 
                     sendTransport.on('connect', ({ dtlsParameters }, callback, errback) => {
                         socketRef.current.emit('connectWebRtcTransport', { dtlsParameters }, (error) => {
-                            if (error) {
-                                console.error('Transport connect error:', error);
-                                errback(error);
-                                return;
-                            }
-                            callback();
+                            if (error) errback(error);
+                            else callback();
                         });
                     });
 
                     sendTransport.on('produce', ({ kind, rtpParameters }, callback, errback) => {
                         socketRef.current.emit('produce', { kind, rtpParameters }, ({ id, error }) => {
-                            if (error) {
-                                console.error('Produce error:', error);
-                                errback(error);
-                                return;
-                            }
-                            callback({ id });
+                            if (error) errback(error);
+                            else callback({ id });
                         });
                     });
 
                     // 6. Produce Video
-                    const videoTrack = stream.getVideoTracks()[0];
+                    const videoTrack = localStream.getVideoTracks()[0];
                     if (videoTrack) {
                         await sendTransport.produce({ track: videoTrack });
                     }
 
                     // 7. Produce Audio
-                    const audioTrack = stream.getAudioTracks()[0];
+                    const audioTrack = localStream.getAudioTracks()[0];
                     if (audioTrack) {
                         await sendTransport.produce({ track: audioTrack });
                     }
 
-                    console.log('Producing video and audio tracks!');
+                    console.log('Joined and producing!');
 
-                    // 8. Get existing producers
+                    // 8. Get existing producers (to see others who are already there)
                     socketRef.current.emit('getProducers', (producerIds) => {
                         producerIds.forEach((id) => consume(id));
                     });
                 });
-
-                // Handle new producers
-                socketRef.current.on('newProducer', ({ producerId }) => {
-                    console.log('New producer:', producerId);
-                    consume(producerId);
-                });
             });
         } catch (err) {
-            console.error('Error starting video:', err);
+            console.error('Error joining meeting:', err);
+            setIsJoined(false);
         }
     };
 
     const leaveRoom = () => {
-        if (socketRef.current) {
-            socketRef.current.disconnect();
-        }
-        if (localVideoRef.current && localVideoRef.current.srcObject) {
-            localVideoRef.current.srcObject.getTracks().forEach(track => track.stop());
-            localVideoRef.current.srcObject = null;
-        }
-        if (remoteVideoRef.current && remoteVideoRef.current.srcObject) {
-            remoteVideoRef.current.srcObject = null;
-        }
-        setIsConnected(false);
-
-        // Re-connect socket for next join attempt
-        socketRef.current = io();
-        socketRef.current.on('connect', () => {
-            console.log('Reconnected to signaling server');
-            setIsConnected(true);
-        });
-        socketRef.current.on('roomFull', () => {
-            alert('Room is full (max 2 users).');
-        });
+        // Refresh the page to cleanly reset everything (simplest for MVP)
+        window.location.reload();
     };
 
     const consume = async (producerId) => {
         try {
             const device = deviceRef.current;
+            if (!device) return;
+
             const rtpCapabilities = device.rtpCapabilities;
 
             // 1. Create Recv Transport if not exists
-            if (!deviceRef.current.recvTransport) {
+            if (!device.recvTransport) {
                 await new Promise((resolve, reject) => {
                     socketRef.current.emit('createWebRtcTransport', {}, async ({ params, error }) => {
                         if (error) return reject(error);
 
                         const recvTransport = device.createRecvTransport(params);
-                        deviceRef.current.recvTransport = recvTransport;
+                        device.recvTransport = recvTransport; // Attach to device instance for easy access
 
                         recvTransport.on('connect', ({ dtlsParameters }, callback, errback) => {
                             socketRef.current.emit('connectWebRtcTransport', { dtlsParameters }, (error) => {
@@ -163,7 +166,7 @@ export default function Room() {
                 });
             });
 
-            const consumer = await deviceRef.current.recvTransport.consume({
+            const consumer = await device.recvTransport.consume({
                 id: params.id,
                 producerId: params.producerId,
                 kind: params.kind,
@@ -195,29 +198,32 @@ export default function Room() {
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
             <div style={{ display: 'flex', gap: '1rem' }}>
                 <div style={{ textAlign: 'center' }}>
-                    <h3>Local Video</h3>
-                    <video ref={localVideoRef} autoPlay playsInline muted style={{ width: '300px', background: '#000', borderRadius: '8px' }} />
+                    <h3>Local Video {localStream ? '(Ready)' : '(Loading...)'}</h3>
+                    <video ref={localVideoRef} autoPlay playsInline muted style={{ width: '300px', background: '#000', borderRadius: '8px', border: isJoined ? '2px solid #4caf50' : '2px solid #666' }} />
                 </div>
                 <div style={{ textAlign: 'center' }}>
                     <h3>Remote Video</h3>
                     <video ref={remoteVideoRef} autoPlay playsInline style={{ width: '300px', background: '#000', borderRadius: '8px' }} />
                 </div>
             </div>
+
             <div style={{ display: 'flex', gap: '1rem' }}>
-                {!isConnected ? (
+                {!isJoined ? (
                     <button
-                        onClick={startVideo}
-                        disabled={!isConnected}
+                        onClick={joinMeeting}
+                        disabled={!localStream || !isSocketConnected}
                         style={{
                             padding: '0.8rem 1.5rem',
-                            background: isConnected ? 'var(--primary)' : '#444',
+                            background: (localStream && isSocketConnected) ? 'var(--primary)' : '#444',
                             color: 'white',
                             border: 'none',
                             borderRadius: '4px',
-                            cursor: isConnected ? 'pointer' : 'not-allowed'
+                            cursor: (localStream && isSocketConnected) ? 'pointer' : 'not-allowed',
+                            fontSize: '1.1rem',
+                            fontWeight: 'bold'
                         }}
                     >
-                        Join Meeting & Start Video
+                        {isSocketConnected ? 'Join Meeting' : 'Connecting...'}
                     </button>
                 ) : (
                     <button
@@ -228,7 +234,9 @@ export default function Room() {
                             color: 'white',
                             border: 'none',
                             borderRadius: '4px',
-                            cursor: 'pointer'
+                            cursor: 'pointer',
+                            fontSize: '1.1rem',
+                            fontWeight: 'bold'
                         }}
                     >
                         End Call
