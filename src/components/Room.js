@@ -75,9 +75,66 @@ export default function Room() {
 
                     console.log('Producing video track!');
                 });
+
+                // Handle new producers
+                socketRef.current.on('newProducer', ({ producerId }) => {
+                    console.log('New producer:', producerId);
+                    consume(producerId);
+                });
             });
         } catch (err) {
             console.error('Error starting video:', err);
+        }
+    };
+
+    const consume = async (producerId) => {
+        try {
+            const device = deviceRef.current;
+            const rtpCapabilities = device.rtpCapabilities;
+
+            // 1. Create Recv Transport if not exists
+            if (!deviceRef.current.recvTransport) {
+                await new Promise((resolve, reject) => {
+                    socketRef.current.emit('createWebRtcTransport', {}, async ({ params, error }) => {
+                        if (error) return reject(error);
+
+                        const recvTransport = device.createRecvTransport(params);
+                        deviceRef.current.recvTransport = recvTransport;
+
+                        recvTransport.on('connect', ({ dtlsParameters }, callback, errback) => {
+                            socketRef.current.emit('connectWebRtcTransport', { dtlsParameters }, (error) => {
+                                if (error) errback(error);
+                                else callback();
+                            });
+                        });
+                        resolve();
+                    });
+                });
+            }
+
+            // 2. Consume
+            const { params } = await new Promise((resolve, reject) => {
+                socketRef.current.emit('consume', { producerId, rtpCapabilities }, (response) => {
+                    if (response.error) reject(response.error);
+                    else resolve(response);
+                });
+            });
+
+            const consumer = await deviceRef.current.recvTransport.consume({
+                id: params.id,
+                producerId: params.producerId,
+                kind: params.kind,
+                rtpParameters: params.rtpParameters,
+            });
+
+            const { track } = consumer;
+            remoteVideoRef.current.srcObject = new MediaStream([track]);
+
+            // Resume the consumer
+            socketRef.current.emit('resume');
+
+        } catch (err) {
+            console.error('Error consuming:', err);
         }
     };
 
