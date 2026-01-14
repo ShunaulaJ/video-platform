@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const next = require('next');
 const http = require('http');
@@ -30,11 +31,75 @@ app.prepare().then(async () => {
 
     const server = express();
     const httpServer = http.createServer(server);
-    const io = new Server(httpServer);
+    const io = new Server(httpServer, {
+        cors: {
+            origin: "*",
+            methods: ["GET", "POST"]
+        }
+    });
 
     // Socket.io connection handler
     io.on('connection', (socket) => {
         console.log('Client connected:', socket.id);
+
+        // Get Router RTP Capabilities
+        socket.on('getRouterRtpCapabilities', (callback) => {
+            callback(router.rtpCapabilities);
+        });
+
+        // Create WebRtcTransport
+        socket.on('createWebRtcTransport', async (data, callback) => {
+            try {
+                const transport = await router.createWebRtcTransport(config.webRtcTransport);
+
+                transport.on('dtlsstatechange', (dtlsState) => {
+                    if (dtlsState === 'closed') transport.close();
+                });
+
+                callback({
+                    params: {
+                        id: transport.id,
+                        iceParameters: transport.iceParameters,
+                        iceCandidates: transport.iceCandidates,
+                        dtlsParameters: transport.dtlsParameters,
+                    }
+                });
+
+                // Store transport in socket for later use (simplified for POC)
+                socket.transport = transport;
+            } catch (error) {
+                console.error('Failed to create transport:', error);
+                callback({ error: error.message });
+            }
+        });
+
+        // Connect WebRtcTransport
+        socket.on('connectWebRtcTransport', async ({ dtlsParameters }, callback) => {
+            try {
+                await socket.transport.connect({ dtlsParameters });
+                callback();
+            } catch (error) {
+                console.error('Failed to connect transport:', error);
+                callback({ error: error.message });
+            }
+        });
+
+        // Produce media
+        socket.on('produce', async ({ kind, rtpParameters }, callback) => {
+            try {
+                const producer = await socket.transport.produce({ kind, rtpParameters });
+
+                producer.on('transportclose', () => {
+                    console.log('Producer transport closed');
+                    producer.close();
+                });
+
+                callback({ id: producer.id });
+            } catch (error) {
+                console.error('Failed to produce:', error);
+                callback({ error: error.message });
+            }
+        });
 
         socket.on('disconnect', () => {
             console.log('Client disconnected:', socket.id);

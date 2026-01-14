@@ -1,3 +1,5 @@
+import Room from '../components/Room';
+
 export default function Home() {
     return (
         <main style={{
@@ -5,22 +7,14 @@ export default function Home() {
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            height: '100vh',
-            gap: '2rem'
+            minHeight: '100vh',
+            gap: '2rem',
+            padding: '2rem'
         }}>
-            <h1 style={{ fontSize: '3rem', fontWeight: 'bold' }}>Better Zoom</h1>
-            <p style={{ fontSize: '1.2rem', color: '#888' }}>Premium Video Conferencing</p>
-            <button style={{
-                padding: '1rem 2rem',
-                fontSize: '1.2rem',
-                background: 'var(--primary)',
-                color: 'white',
-                border: 'none',
-                borderRadius: '8px',
-                cursor: 'pointer'
-            }}>
-                Start Meeting
-            </button>
+            <h1 style={{ fontSize: '3rem', fontWeight: 'bold', margin: 0 }}>Better Zoom</h1>
+            <p style={{ fontSize: '1.2rem', color: '#888', margin: 0 }}>Premium Video Conferencing</p>
+
+            <Room />
         </main>
     );
 }

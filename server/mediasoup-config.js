@@ -1,5 +1,3 @@
-const os = require('os');
-
 module.exports = {
     // Mediasoup Worker settings
     worker: {
@@ -39,7 +37,7 @@ module.exports = {
         listenIps: [
             {
                 ip: '0.0.0.0',
-                announcedIp: '104.198.154.216', // YOUR GCP EXTERNAL IP
+                announcedIp: process.env.MEDIASOUP_ANNOUNCED_IP || '127.0.0.1',
             },
         ],
         enableUdp: true,
